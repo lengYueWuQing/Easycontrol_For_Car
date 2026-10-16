@@ -21,6 +21,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import top.eiyooooo.easycontrol.app.entity.AppData;
 import top.eiyooooo.easycontrol.app.entity.Device;
+import top.eiyooooo.easycontrol.app.entity.RemoteAppInfo;
 import top.eiyooooo.easycontrol.app.helper.EventMonitor;
 import top.eiyooooo.easycontrol.app.helper.L;
 import top.eiyooooo.easycontrol.app.helper.PublicTools;
@@ -282,7 +283,6 @@ public class Client {
   private static final int CLIPBOARD_EVENT = 3;
   private static final int CHANGE_SIZE_EVENT = 4;
   private static final int KEEP_ALIVE_EVENT = 5;
-  private static final int MODE_CHANGED_EVENT = 6;
 
   private void executeStreamVideo() {
     try {
@@ -329,13 +329,6 @@ public class Client {
             break;
           case KEEP_ALIVE_EVENT:
             lastKeepAliveTime = System.currentTimeMillis();
-            break;
-          case MODE_CHANGED_EVENT:
-            int mode = bufferStream.readInt();
-            if (mode == 0) {
-              PublicTools.logToast(AppData.main.getString(R.string.error_transfer_app_ended));
-            }
-            AppData.uiHandler.post(() -> changeMode(mode));
             break;
         }
       }
@@ -437,18 +430,18 @@ public class Client {
     }).start();
   }
 
-  public static ArrayList<String> getAppList(Device device, UsbDevice usbDevice) {
+  public static ArrayList<RemoteAppInfo> getAppList(Device device, UsbDevice usbDevice) {
     try {
       if (Adb.adbMap.get(device.uuid) == null) {
         if (device.isLinkDevice()) Adb.adbMap.put(device.uuid, new Adb(device.uuid, usbDevice, AppData.keyPair));
         else Adb.adbMap.put(device.uuid, new Adb(device.uuid, device.address, AppData.keyPair));
       }
-      ArrayList<String> appList = new ArrayList<>();
-      String output = Adb.getStringResponseFromServer(device, "getAllAppInfo", "app_type=1");
+      ArrayList<RemoteAppInfo> appList = new ArrayList<>();
+      String output = Adb.getStringResponseFromServer(device, "getAllAppInfo", "app_type=1", "icon=1");
       String[] allAppInfo = output.split("<!@n@!>");
       for (String info : allAppInfo) {
         String[] appInfo = info.split("<!@r@!>");
-        if (appInfo.length > 1) appList.add(appInfo[1] + "@" + appInfo[0]);
+        if (appInfo.length > 1) appList.add(RemoteAppInfo.parse(appInfo));
       }
       return appList;
     } catch (Exception e) {

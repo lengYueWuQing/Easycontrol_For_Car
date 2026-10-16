@@ -2,6 +2,7 @@ package top.eiyooooo.easycontrol.app;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.Intent;
 import android.content.res.AssetManager;
 import android.os.Bundle;
 import android.util.DisplayMetrics;
@@ -77,6 +78,8 @@ public class PairActivity extends Activity {
             pairActivity.certRegenerate.setClickable(true);
         });
 
+        pairActivity.pairByQr.setOnClickListener(v -> startActivityForResult(new Intent(this, QrPairActivity.class), QrPairActivity.RESULT_CODE));
+
         pairActivity.runPair.setOnClickListener(v -> new Thread(() -> {
             if (AdbPairManager.INSTANCE == null) {
                 PublicTools.logToast(getString(R.string.pair_no_cert));
@@ -131,6 +134,17 @@ public class PairActivity extends Activity {
                 pairActivity.certRegenerate.setClickable(true);
             });
         });
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == QrPairActivity.RESULT_CODE && resultCode == RESULT_OK && data != null) {
+            String ip = data.getStringExtra("ip");
+            Integer debugPort = data.getIntExtra("debug_port", 0);
+            if (ip != null && !ip.isEmpty()) pairActivity.ip.setText(ip);
+            if (debugPort != 0) pairActivity.debugPort.setText(String.valueOf(debugPort));
+        }
     }
 
     public boolean ifAssetExists(String filename) {

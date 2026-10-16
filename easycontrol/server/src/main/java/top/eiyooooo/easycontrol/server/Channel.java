@@ -23,10 +23,10 @@ import android.hardware.display.VirtualDisplay;
 import android.media.MediaCodec;
 import android.os.Build;
 import android.os.Looper;
+import android.util.Base64;
 import android.util.DisplayMetrics;
-import android.util.Pair;
 import android.view.Surface;
-
+import android.view.SurfaceView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import top.eiyooooo.easycontrol.server.helper.FakeContext;
@@ -222,6 +222,10 @@ public class Channel {
     }
 
     public String getAllAppInfo(int appType) throws InvocationTargetException, IllegalAccessException {
+        return getAllAppInfo(appType, false);
+    }
+
+    public String getAllAppInfo(int appType, boolean withIcon) throws InvocationTargetException, IllegalAccessException {
         List<String> packages = getAppPackages();
         if (packages == null) {
             return "";
@@ -244,12 +248,12 @@ public class Channel {
                     }
                 }
             }
-            phasePackageInfo(builder, packageInfo);
+            phasePackageInfo(builder, packageInfo, withIcon);
         }
         return builder.toString().trim();
     }
 
-    private void phasePackageInfo(StringBuilder builder, PackageInfo packageInfo) {
+    private void phasePackageInfo(StringBuilder builder, PackageInfo packageInfo, boolean withIcon) {
         ApplicationInfo applicationInfo = packageInfo.applicationInfo;
         builder.append(applicationInfo.packageName);
         builder.append("<!@r@!>").append(getLabel(applicationInfo));
@@ -278,7 +282,32 @@ public class Channel {
         }
         builder.append("<!@r@!>").append(applicationInfo.uid);
         builder.append("<!@r@!>").append(applicationInfo.sourceDir);
+        if (withIcon) {
+            builder.append("<!@r@!>").append(getIconBase64(applicationInfo.packageName, 64));
+        }
         builder.append("<!@n@!>");
+    }
+
+    // 获取应用图标并转为 base64 字符串（失败返回 null）
+    public String getIconBase64(String packageName, int size) {
+        try {
+            Bitmap bitmap = Drawable2Bitmap(packageName);
+            if (bitmap == null) return "null";
+            if (size > 0 && (bitmap.getWidth() > size || bitmap.getHeight() > size)) {
+                Bitmap scaled = Bitmap.createScaledBitmap(bitmap, size, size, true);
+                if (scaled != bitmap) bitmap.recycle();
+                bitmap = scaled;
+            }
+            ByteArrayOutputStream stream = new ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream);
+            byte[] bytes = stream.toByteArray();
+            stream.close();
+            bitmap.recycle();
+            return Base64.encodeToString(bytes, Base64.NO_WRAP);
+        } catch (Exception e) {
+            L.e("getIconBase64 " + packageName, e);
+            return "null";
+        }
     }
 
     public String getLabel(ApplicationInfo info) {
@@ -442,14 +471,28 @@ public class Channel {
         return jsonObjectResult;
     }
 
-    public Pair<VirtualDisplay, Surface> createVirtualDisplay(int width, int height, int density) throws Exception {
+    public VirtualDisplay createVirtualDisplay(int width, int height, int density) throws Exception {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R)
             throw new Exception("Virtual display is not supported before Android 11");
-        Surface surface = MediaCodec.createPersistentInputSurface();
+        Surface surface;
+        try {
+            SurfaceView surfaceView = new SurfaceView(FakeContext.get());
+            surface = surfaceView.getHolder().getSurface();
+        } catch (Exception ignored) {
+            L.w("Failed to create SurfaceView, trying MediaCodec");
+            surface = MediaCodec.createPersistentInputSurface();
+        }
+        if (surface == null) throw new Exception("Failed to create surface");
+        try {
+            // Android 13 上公开 API 因 packageName 校验失败（packageName must match the calling uid）被拒，
+            // 优先通过隐藏静态方法创建独立虚拟显示（INVALID_DISPLAY 表示非镜像）
+            return top.eiyooooo.easycontrol.server.wrappers.DisplayManager.createVirtualDisplay("easycontrol_for_car", width, height, android.view.Display.INVALID_DISPLAY, surface);
+        } catch (Exception e) {
+            L.w("createVirtualDisplay by internal method error, fallback to public api", e);
+        }
         android.hardware.display.DisplayManager displayManager = DisplayManager.class.getDeclaredConstructor(Context.class).newInstance(FakeContext.get());
         int flags = getVirtualDisplayFlags();
-        VirtualDisplay virtualDisplay = displayManager.createVirtualDisplay("easycontrol_for_car", width, height, density, surface, flags);
-        return new Pair<>(virtualDisplay, surface);
+        return displayManager.createVirtualDisplay("easycontrol_for_car", width, height, density, surface, flags);
     }
 
     private static int getVirtualDisplayFlags() {

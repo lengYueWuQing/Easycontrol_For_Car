@@ -22,6 +22,19 @@
   <string name="pair_generating_cert">Pairing certificate generating</string>
   <string name="pair_no_cert">No Pairing Certificate, please try regenerate</string>
   <string name="pair_cert_regenerate">Regenerate</string>
+  <string name="pair_by_qr">Pair by QR code</string>
+  <string name="qr_pair_scan_hint">Aim at the QR code from "Pair devices with QR code" on the remote device</string>
+  <string name="qr_pair_status_scan">Scan the QR code from "Pair devices with QR code" on the remote device</string>
+  <string name="qr_pair_status_find">Pairing info acquired, discovering pairing service (make sure both devices are on the same network)…</string>
+  <string name="qr_pair_status_pairing">Pairing…</string>
+  <string name="qr_pair_status_connecting">Paired, opening debug port…</string>
+  <string name="qr_pair_success">Paired, debug port opened (5555), IP and port filled in</string>
+  <string name="qr_pair_failed">Pairing failed: %s</string>
+  <string name="qr_pair_content_invalid">Unrecognized QR code, please scan the QR code from "Pair devices with QR code" on the remote device</string>
+  <string name="qr_pair_timeout">Timeout discovering pairing service, make sure both devices are on the same network without AP isolation</string>
+  <string name="qr_pair_open_port_error">Paired, but failed to open debug port, IP filled in, please enter the debug port manually and tap "Open port"</string>
+  <string name="qr_pair_version_tip">QR code scanning is not supported on this system (Android 7.0+ required)</string>
+  <string name="qr_pair_retry">Scan again</string>
   <string name="pair_success"> success</string>
   <string name="pair_failed"> failed</string>
 
@@ -143,6 +156,7 @@
   <string name="add_device_scan_finish">Scan finished</string>
   <string name="add_device_scan_address_finish_none">Scan finished(No device)</string>
   <string name="add_device_scan_specify_app_finish_error">Scan error, please check if the device can be connected</string>
+  <string name="search_app">Search app name or package</string>
   <string name="add_device_option">Advanced options</string>
   <string name="add_device_button">OK</string>
 
@@ -175,8 +189,7 @@
   <string name="error_connect_server">Failed to connect</string>
   <string name="error_stream_closed">Disconnected</string>
   <string name="error_create_display">The controlled end does not support application transfer (requires Android 11 and above)</string>
-  <string name="error_transfer_app_failed">Application transfer failed, screen mirroring has started</string>
-  <string name="error_transfer_app_ended">Application transfer has ended, screen mirroring has started</string>
+  <string name="error_transfer_app_failed">application transfer failed, screen mirroring has been started</string>
   <string name="error_app_not_found">The specified package name application does not exist</string>
   <string name="error_device_not_found">Device not found</string>
   <string name="error_default_device_not_found">Default device not found</string>

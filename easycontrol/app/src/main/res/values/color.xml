@@ -5,6 +5,7 @@
   <color name="onBackground">#242424</color>
   <color name="onBackgroundSecond">#636564</color>
   <color name="cardBackground">#FFFFFF</color>
+  <color name="smallViewBackground">#B8FFFFFF</color>
   <color name="onCardBackground">#000000</color>
   <color name="onCardBackgroundSecond">#696969</color>
   <color name="onCardDivider">#32000000</color>

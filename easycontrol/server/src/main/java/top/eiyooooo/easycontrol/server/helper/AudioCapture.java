@@ -3,6 +3,7 @@ package top.eiyooooo.easycontrol.server.helper;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.content.AttributionSource;
+import android.content.Context;
 import android.media.*;
 import android.os.Build;
 import android.os.Looper;
@@ -25,6 +26,16 @@ public final class AudioCapture {
 
     public static AudioRecord init() {
         AudioRecord recorder;
+        // Android 16 开始限制通过 REMOTE_SUBMIX 采集播放音频（scrcpy #5698/#6021），优先使用 AudioPolicy 混音采集
+        if (Build.VERSION.SDK_INT >= 36) {
+            try {
+                recorder = createAudioRecordByAudioPolicy();
+                recorder.startRecording();
+                return recorder;
+            } catch (Throwable e) {
+                L.w("Cannot create AudioRecord by AudioPolicy, fallback to REMOTE_SUBMIX", e);
+            }
+        }
         try {
             recorder = createAudioRecord();
         } catch (NullPointerException e) {
@@ -37,6 +48,85 @@ public final class AudioCapture {
 
     public static int millisToBytes(int millis) {
         return (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE / 1000) * millis;
+    }
+
+    // 必须持有 policy 引用，否则会被系统注销导致采集失效
+    private static Object registeredAudioPolicy;
+
+    // Android 16+ 通过 AudioPolicy 混音采集播放音频（参考 scrcpy audio/AudioPlaybackCapture）：
+    // AudioMixingRule rule = new AudioMixingRule.Builder()
+    //         .setTargetMixRole(AudioMixingRule.MIX_ROLE_PLAYERS)
+    //         .addMixRule(AudioMixingRule.RULE_MATCH_ATTRIBUTE_USAGE, usage)
+    //         .voiceCommunicationCaptureAllowed(true)
+    //         .build();
+    // AudioMix mix = new AudioMix.Builder(rule).setRouteFlags(ROUTE_FLAG_LOOP_BACK | ROUTE_FLAG_RENDER).setFormat(format).build();
+    // AudioPolicy policy = new AudioPolicy.Builder(context).addMix(mix).build();
+    // AudioManager.registerAudioPolicyStatic(policy);
+    // return policy.createAudioRecordSink(mix);
+    @SuppressLint({"WrongConstant", "MissingPermission"})
+    private static AudioRecord createAudioRecordByAudioPolicy() throws Exception {
+        Class<?> mixingRuleClass = Class.forName("android.media.audiopolicy.AudioMixingRule");
+        Class<?> mixingRuleBuilderClass = Class.forName("android.media.audiopolicy.AudioMixingRule$Builder");
+        Class<?> audioMixClass = Class.forName("android.media.audiopolicy.AudioMix");
+        Class<?> audioMixBuilderClass = Class.forName("android.media.audiopolicy.AudioMix$Builder");
+        Class<?> audioPolicyBuilderClass = Class.forName("android.media.audiopolicy.AudioPolicy$Builder");
+        Class<?> audioPolicyClass = Class.forName("android.media.audiopolicy.AudioPolicy");
+
+        // 构建 AudioMixingRule
+        Object ruleBuilder = mixingRuleBuilderClass.getDeclaredConstructor().newInstance();
+        mixingRuleBuilderClass.getMethod("setTargetMixRole", int.class)
+                .invoke(ruleBuilder, getStaticInt(mixingRuleClass, "MIX_ROLE_PLAYERS", 0));
+        Method addMixRuleMethod = mixingRuleBuilderClass.getMethod("addMixRule", int.class, Object.class);
+        int usageRule = getStaticInt(mixingRuleClass, "RULE_MATCH_ATTRIBUTE_USAGE", 1);
+        int[] usages = {AudioAttributes.USAGE_UNKNOWN, AudioAttributes.USAGE_MEDIA, AudioAttributes.USAGE_GAME};
+        for (int usage : usages) {
+            AudioAttributes attributes = new AudioAttributes.Builder().setUsage(usage).build();
+            addMixRuleMethod.invoke(ruleBuilder, usageRule, attributes);
+        }
+        // 允许采集语音通信音频（部分 Android 16 版本新增，低版本无此方法）
+        try {
+            mixingRuleBuilderClass.getMethod("voiceCommunicationCaptureAllowed", boolean.class).invoke(ruleBuilder, true);
+        } catch (NoSuchMethodException ignored) {
+        }
+        Object mixingRule = mixingRuleBuilderClass.getMethod("build").invoke(ruleBuilder);
+
+        // 构建 AudioMix，ROUTE_FLAG_LOOP_BACK 采集且 ROUTE_FLAG_RENDER 保证设备继续外放
+        Constructor<?> mixBuilderConstructor = audioMixBuilderClass.getDeclaredConstructor(mixingRuleClass);
+        mixBuilderConstructor.setAccessible(true);
+        Object mixBuilder = mixBuilderConstructor.newInstance(mixingRule);
+        int routeFlags = getStaticInt(audioMixClass, "ROUTE_FLAG_LOOP_BACK", 2) | getStaticInt(audioMixClass, "ROUTE_FLAG_RENDER", 1);
+        audioMixBuilderClass.getMethod("setRouteFlags", int.class).invoke(mixBuilder, routeFlags);
+        // 尽量对齐编码器格式（48kHz/双声道/PCM16）
+        AudioFormat format = new AudioFormat.Builder()
+                .setEncoding(ENCODING)
+                .setSampleRate(SAMPLE_RATE)
+                .setChannelMask(CHANNEL_CONFIG)
+                .build();
+        try {
+            audioMixBuilderClass.getMethod("setFormat", AudioFormat.class).invoke(mixBuilder, format);
+        } catch (NoSuchMethodException ignored) {
+        }
+        Object audioMix = audioMixBuilderClass.getMethod("build").invoke(mixBuilder);
+
+        // 构建 AudioPolicy
+        Object policyBuilder = audioPolicyBuilderClass.getDeclaredConstructor(Context.class).newInstance(FakeContext.get());
+        audioPolicyBuilderClass.getMethod("addMix", audioMixClass).invoke(policyBuilder, audioMix);
+        Object policy = audioPolicyBuilderClass.getMethod("build").invoke(policyBuilder);
+
+        // 注册 policy 并创建 AudioRecord
+        AudioManager.class.getMethod("registerAudioPolicyStatic", audioPolicyClass).invoke(null, policy);
+        AudioRecord audioRecord = (AudioRecord) audioPolicyClass.getMethod("createAudioRecordSink", audioMixClass)
+                .invoke(policy, audioMix);
+        registeredAudioPolicy = policy;
+        return audioRecord;
+    }
+
+    private static int getStaticInt(Class<?> cls, String fieldName, int defaultValue) {
+        try {
+            return cls.getField(fieldName).getInt(null);
+        } catch (Exception e) {
+            return defaultValue;
+        }
     }
 
     @TargetApi(Build.VERSION_CODES.M)

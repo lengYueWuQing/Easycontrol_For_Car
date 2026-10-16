@@ -38,6 +38,9 @@ public class Adb {
   private static final String serverName = "/data/local/tmp/easycontrol_for_car_server_" + BuildConfig.VERSION_CODE + ".jar";
   public Thread startServerThread = new Thread(this::startServer);
   public BufferStream serverShell;
+  // 设备型号与系统版本，最开始连接时获取
+  public String model;
+  public String version;
 
   public Adb(String uuid, String address, AdbKeyPair keyPair) throws Exception {
     this.uuid = uuid;
@@ -62,7 +65,7 @@ public class Adb {
   }
 
   private void connect(AdbKeyPair keyPair) throws Exception {
-    // 连接ADB并认证
+    // 连接ADB并认证，使用RSA加密验证传输（被控端关闭ADB验证时无AUTH消息，直接跳过）
     channel.write(AdbProtocol.generateConnect());
     AdbProtocol.AdbMessage message = AdbProtocol.AdbMessage.parseAdbMessage(channel);
     if (message.command == AdbProtocol.CMD_AUTH) {
@@ -79,13 +82,27 @@ public class Adb {
     }
     MAX_DATA = message.arg1;
     if (uuid == null) {
-      channel.close();
+      // 一次性连接：获取设备型号与系统版本后关闭（用于扫描设备时识别设备）
+      try {
+        handleInThread.start();
+        handleOutThread.start();
+        model = runAdbCmd("getprop ro.product.model").trim();
+        version = runAdbCmd("getprop ro.build.version.release").trim();
+      } catch (Exception ignored) {
+      }
+      close();
       return;
     }
     // 启动后台进程
     handleInThread.setPriority(Thread.MAX_PRIORITY);
     handleInThread.start();
     handleOutThread.start();
+    // 最开始连接时获取设备型号与系统版本
+    try {
+      model = runAdbCmd("getprop ro.product.model").trim();
+      version = runAdbCmd("getprop ro.build.version.release").trim();
+    } catch (Exception ignored) {
+    }
   }
 
   public final void startServer() {

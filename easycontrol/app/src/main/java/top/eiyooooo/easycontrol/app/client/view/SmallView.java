@@ -5,6 +5,7 @@ import android.content.res.Configuration;
 import android.graphics.Outline;
 import android.graphics.PixelFormat;
 import android.os.Build;
+import android.os.SystemClock;
 import android.text.InputType;
 import android.util.DisplayMetrics;
 import android.util.Pair;
@@ -51,6 +52,11 @@ public class SmallView extends ViewOutlineProvider {
   public SmallView(ClientView clientView) {
     this.clientView = clientView;
     smallViewParams.gravity = Gravity.START | Gravity.TOP;
+    // 高斯模糊背景（Android 12+ 且系统开启模糊时生效，否则自动退化为半透明背景）
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      smallViewParams.flags |= WindowManager.LayoutParams.FLAG_BLUR_BEHIND;
+      smallViewParams.setBlurBehindRadius(PublicTools.dp2px(30f));
+    }
     // 设置默认导航栏状态
     setNavBarHide(AppData.setting.getDefaultShowNavBar());
     // 获取屏幕宽高
@@ -76,6 +82,22 @@ public class SmallView extends ViewOutlineProvider {
       clientView.device.small_free_width = shortEdge * 2 / 5;
       clientView.device.small_free_height = shortEdge * 3 / 5;
     }
+    // 修正更换不同分辨率设备后持久化尺寸/位置超出屏幕的问题（超出则重置为默认）
+    if (clientView.device.small_p_p_width > shortEdge || clientView.device.small_p_p_height > longEdge
+            || clientView.device.small_p_l_width > shortEdge || clientView.device.small_p_l_height > longEdge
+            || clientView.device.small_l_p_width > longEdge || clientView.device.small_l_p_height > shortEdge
+            || clientView.device.small_l_l_width > longEdge || clientView.device.small_l_l_height > shortEdge
+            || clientView.device.small_free_width > longEdge || clientView.device.small_free_height > longEdge
+            || clientView.device.small_p_p_x >= shortEdge || clientView.device.small_p_p_x + clientView.device.small_p_p_width <= 0
+            || clientView.device.small_p_p_y >= longEdge || clientView.device.small_p_p_y + clientView.device.small_p_p_height <= 0
+            || clientView.device.small_p_l_x >= shortEdge || clientView.device.small_p_l_x + clientView.device.small_p_l_width <= 0
+            || clientView.device.small_p_l_y >= longEdge || clientView.device.small_p_l_y + clientView.device.small_p_l_height <= 0
+            || clientView.device.small_l_p_x >= longEdge || clientView.device.small_l_p_x + clientView.device.small_l_p_width <= 0
+            || clientView.device.small_l_p_y >= shortEdge || clientView.device.small_l_p_y + clientView.device.small_l_p_height <= 0
+            || clientView.device.small_l_l_x >= longEdge || clientView.device.small_l_l_x + clientView.device.small_l_l_width <= 0
+            || clientView.device.small_l_l_y >= shortEdge || clientView.device.small_l_l_y + clientView.device.small_l_l_height <= 0) {
+      resetToDefaultSize();
+    }
     // 设置监听控制
     setFloatVideoListener();
     setReSizeListener();
@@ -83,6 +105,8 @@ public class SmallView extends ViewOutlineProvider {
     // 设置窗口监听
     smallView.textureViewLayout.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
       if (right == 0 || bottom == 0) return;
+      // 小窗尺寸变化时同步适配按钮面板宽度，避免面板超出投屏画面宽度
+      fitBarView();
       InitSize++;
       if (InitSize < 2) return;
 
@@ -299,6 +323,9 @@ public class SmallView extends ViewOutlineProvider {
     });
   }
 
+  // 把手上一次单击时间（双击检测）
+  private long lastBarTapTime = 0;
+
   // 设置上横条监听控制
   @SuppressLint("ClickableViewAccessibility")
   private void setBarListener() {
@@ -329,6 +356,13 @@ public class SmallView extends ViewOutlineProvider {
           }
           // 拖动限制，避免拖到状态栏
           if (y < statusBarHeight + 10) return true;
+          // 拖动限制，至少保留 60px 在屏幕内，避免拖出屏幕外
+          int screenW = LocalIsPortrait() ? shortEdge : longEdge;
+          int screenH = LocalIsPortrait() ? longEdge : shortEdge;
+          int viewW = smallView.getRoot().getWidth();
+          int viewH = smallView.getRoot().getHeight();
+          if (paramsX.get() + flipX < -viewW + 60 || paramsX.get() + flipX > screenW - 60) return true;
+          if (paramsY.get() + flipY > screenH - 60) return true;
           // 更新
           smallViewParams.x = paramsX.get() + flipX;
           smallViewParams.y = paramsY.get() + flipY;
@@ -361,8 +395,15 @@ public class SmallView extends ViewOutlineProvider {
         }
         case MotionEvent.ACTION_UP:
           if (!isFilp.get()) {
-            changeBarView();
-            barViewTimer();
+            // 双击把手才显示/隐藏按钮面板（单击只计半拍）
+            long now = SystemClock.uptimeMillis();
+            if (now - lastBarTapTime < 300) {
+              lastBarTapTime = 0;
+              changeBarView();
+              barViewTimer();
+            } else {
+              lastBarTapTime = now;
+            }
           }
           break;
       }
@@ -411,27 +452,7 @@ public class SmallView extends ViewOutlineProvider {
       barViewTimer();
     });
     smallView.resetLocation.setOnClickListener(v -> {
-      clientView.device.small_p_p_x = 0;
-      clientView.device.small_p_p_y = 0;
-      clientView.device.small_p_l_x = 0;
-      clientView.device.small_p_l_y = 0;
-      clientView.device.small_l_p_x = 0;
-      clientView.device.small_l_p_y = 0;
-      clientView.device.small_l_l_x = 0;
-      clientView.device.small_l_l_y = 0;
-      clientView.device.small_free_x = 0;
-      clientView.device.small_free_y = 0;
-      clientView.device.small_p_p_width = shortEdge * 4 / 5;
-      clientView.device.small_p_p_height = longEdge * 4 / 5;
-      clientView.device.small_p_l_width = shortEdge * 4 / 5;
-      clientView.device.small_p_l_height = longEdge * 4 / 5;
-      clientView.device.small_l_p_width = longEdge * 4 / 5;
-      clientView.device.small_l_p_height = shortEdge * 4 / 5;
-      clientView.device.small_l_l_width = longEdge * 4 / 5;
-      clientView.device.small_l_l_height = shortEdge * 4 / 5;
-      clientView.device.small_free_width = shortEdge * 2 / 5;
-      clientView.device.small_free_height = shortEdge * 3 / 5;
-      clientView.updateMaxSize(clientView.getMaxSize());
+      resetToDefaultSize();
       barViewTimer();
     });
     smallView.buttonPower.setOnClickListener(v -> {
@@ -446,13 +467,52 @@ public class SmallView extends ViewOutlineProvider {
     smallView.buttonNavBar.setImageResource(isShow ? R.drawable.not_equal : R.drawable.equals);
   }
 
+  // 重置为默认尺寸与位置
+  private void resetToDefaultSize() {
+    clientView.device.small_p_p_x = 0;
+    clientView.device.small_p_p_y = 0;
+    clientView.device.small_p_l_x = 0;
+    clientView.device.small_p_l_y = 0;
+    clientView.device.small_l_p_x = 0;
+    clientView.device.small_l_p_y = 0;
+    clientView.device.small_l_l_x = 0;
+    clientView.device.small_l_l_y = 0;
+    clientView.device.small_free_x = 0;
+    clientView.device.small_free_y = 0;
+    clientView.device.small_p_p_width = shortEdge * 4 / 5;
+    clientView.device.small_p_p_height = longEdge * 4 / 5;
+    clientView.device.small_p_l_width = shortEdge * 4 / 5;
+    clientView.device.small_p_l_height = longEdge * 4 / 5;
+    clientView.device.small_l_p_width = longEdge * 4 / 5;
+    clientView.device.small_l_p_height = shortEdge * 4 / 5;
+    clientView.device.small_l_l_width = longEdge * 4 / 5;
+    clientView.device.small_l_l_height = shortEdge * 4 / 5;
+    clientView.device.small_free_width = shortEdge * 2 / 5;
+    clientView.device.small_free_height = shortEdge * 3 / 5;
+    clientView.updateMaxSize(clientView.getMaxSize());
+  }
+
   private void changeBarView() {
     if (clientView == null) return;
     boolean toShowView = smallView.barView.getVisibility() == View.GONE;
+    if (toShowView) fitBarView();
     clientView.viewAnim(smallView.barView, toShowView, 0, PublicTools.dp2px(-40f), (isStart -> {
       if (isStart && toShowView) smallView.barView.setVisibility(View.VISIBLE);
       else if (!isStart && !toShowView) smallView.barView.setVisibility(View.GONE);
     }));
+  }
+
+  // 按钮面板宽度限制为不超过小窗（投屏画面）宽度，避免面板把小窗撑宽超出投屏画面
+  private void fitBarView() {
+    int windowWidth = smallView.textureViewLayout.getWidth();
+    if (windowWidth == 0) return;
+    android.widget.FrameLayout.LayoutParams layoutParams = (android.widget.FrameLayout.LayoutParams) smallView.barView.getLayoutParams();
+    // 226dp 为面板自然宽度（5 列按钮 + padding）
+    int fitWidth = Math.min(PublicTools.dp2px(226f), windowWidth);
+    if (layoutParams.width != fitWidth) {
+      layoutParams.width = fitWidth;
+      smallView.barView.setLayoutParams(layoutParams);
+    }
   }
 
   private void changeBar(int Show) {
@@ -504,6 +564,10 @@ public class SmallView extends ViewOutlineProvider {
         int sizeX = (int) (event.getRawX() - smallViewParams.x);
         int sizeY = (int) (event.getRawY() - smallViewParams.y);
         if (sizeX < minSize || sizeY < minSize) return true;
+        // 拉伸限制，不超过当前方向的屏幕宽高，避免小窗超出屏幕
+        int screenW = LocalIsPortrait() ? shortEdge : longEdge;
+        int screenH = LocalIsPortrait() ? longEdge : shortEdge;
+        if (sizeX > screenW || sizeY > screenH) return true;
 
         if (clientView.mode == 1 && clientView.device.setResolution) {
           clientView.reCalculateTextureViewSize(sizeX, sizeY);
