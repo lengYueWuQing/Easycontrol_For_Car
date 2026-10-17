@@ -150,10 +150,9 @@ public class AudioDecode {
       loudnessEnhancer = new LoudnessEnhancer(audioTrack.getAudioSessionId());
       loudnessEnhancer.setTargetGain(2000);
       loudnessEnhancer.setEnabled(true);
-
     }catch (Exception e){
-      L.log("LoudnessEnhancer err", e);
+      L.log("setLoudnessEnhancer err", e);
     }
-
+    
   }
 }

@@ -22,19 +22,6 @@
   <string name="pair_generating_cert">配对证书生成中</string>
   <string name="pair_no_cert">无配对证书，请尝试重置</string>
   <string name="pair_cert_regenerate">重置</string>
-  <string name="pair_by_qr">扫码配对</string>
-  <string name="qr_pair_scan_hint">对准被控端"使用二维码配对设备"生成的二维码</string>
-  <string name="qr_pair_status_scan">请扫描被控端"使用二维码配对设备"生成的二维码</string>
-  <string name="qr_pair_status_find">已获取配对信息，正在查找配对服务（请确保两台设备在同一网络）…</string>
-  <string name="qr_pair_status_pairing">正在配对…</string>
-  <string name="qr_pair_status_connecting">配对成功，正在打开调试端口…</string>
-  <string name="qr_pair_success">配对成功，调试端口已打开（5555），IP 与端口已回填</string>
-  <string name="qr_pair_failed">配对失败：%s</string>
-  <string name="qr_pair_content_invalid">二维码内容无法识别，请扫描被控端"使用二维码配对设备"生成的二维码</string>
-  <string name="qr_pair_timeout">查找配对服务超时，请确认两台设备在同一网络且未开启 AP 隔离</string>
-  <string name="qr_pair_open_port_error">配对成功，但打开调试端口失败，已回填 IP，请手动填写调试端口后点击"打开端口"</string>
-  <string name="qr_pair_version_tip">当前系统不支持扫码功能（需要 Android 7.0 以上）</string>
-  <string name="qr_pair_retry">重新扫码</string>
   <string name="pair_success">成功</string>
   <string name="pair_failed">失败</string>
 
@@ -190,6 +177,7 @@
   <string name="error_stream_closed">连接断开</string>
   <string name="error_create_display">被控端不支持应用流转(需安卓11及以上)</string>
   <string name="error_transfer_app_failed">应用流转失败，屏幕镜像已启动</string>
+  <string name="error_transfer_app_ended">应用流转已结束，屏幕镜像已启动</string>
   <string name="error_app_not_found">指定包名的应用不存在</string>
   <string name="error_device_not_found">未找到该设备</string>
   <string name="error_default_device_not_found">未找到默认设备</string>

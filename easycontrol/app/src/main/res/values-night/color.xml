@@ -5,7 +5,6 @@
   <color name="onBackground">#DEDEDE</color>
   <color name="onBackgroundSecond">#A7A7A7</color>
   <color name="cardBackground">#3D3D3D</color>
-  <color name="smallViewBackground">#C03D3D3D</color>
   <color name="onCardBackground">#FFFFFF</color>
   <color name="onCardBackgroundSecond">#8B8B8B</color>
   <color name="onCardDivider">#80FFFFFF</color>

@@ -10,14 +10,9 @@
   <uses-permission android:name="android.permission.USB_PERMISSION" /> <!-- USB -->
   <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" /> <!-- 桌面快捷方式 -->
   <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" /> <!-- 使用统计 -->
-  <uses-permission android:name="android.permission.CAMERA" /> <!-- 扫码配对 -->
   <uses-permission android:name="android.permission.VIBRATE" /> <!-- 长按触感反馈（安卓17 MIUI 必需） -->
 
   <uses-feature android:name="android.hardware.usb.host" />
-  <uses-feature android:name="android.hardware.camera" android:required="false" />
-
-  <!-- zxing-android-embedded 要求 minSdk 24，低版本设备不进入扫码流程 -->
-  <uses-sdk tools:overrideLibrary="com.google.zxing.client.android, com.google.zxing" />
 
   <application
     android:name=".helper.MyApplication"
@@ -54,9 +49,6 @@
       android:exported="false" />
     <activity
       android:name=".PairActivity"
-      android:exported="false" />
-    <activity
-      android:name=".QrPairActivity"
       android:exported="false" />
     <activity
       android:name=".SetActivity"

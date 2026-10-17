@@ -2,7 +2,10 @@ package top.eiyooooo.easycontrol.server;
 
 import android.hardware.display.VirtualDisplay;
 import android.os.Build;
+import android.util.Pair;
 import android.view.Display;
+import android.view.Surface;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 import top.eiyooooo.easycontrol.server.entity.DisplayInfo;
@@ -48,11 +51,16 @@ public class Server {
                     try {
                         String input = scanner.nextLine();
                         L.d("INPUT: " + input);
-                        if (input.startsWith("/exit")) System.exit(0);
+                        if (input.startsWith("/exit")) {
+                            releaseAllVirtualDisplay();
+                            System.exit(0);
+                        }
                         else if (input.startsWith("/")) handleRequest(parseRequest(input));
                         else throw new Exception("Unknown command");
                     } catch (Exception e) {
                         L.e("consoleInputHandler error", e);
+                        releaseAllVirtualDisplay();
+                        System.exit(0);
                     }
                 }
             }
@@ -92,7 +100,7 @@ public class Server {
         return request;
     }
 
-    Map<Integer, VirtualDisplay> cache = new HashMap<>();
+    Map<Integer, Pair<VirtualDisplay, Surface>> cache = new HashMap<>();
 
     private void handleRequest(HashMap<String, String> request) {
         try {
@@ -171,9 +179,9 @@ public class Server {
                     if (line3 != null) density = Integer.parseInt(line3);
                     else density = defaultDisplay.density;
 
-                    VirtualDisplay display = channel.createVirtualDisplay(width, height, density);
+                    Pair<VirtualDisplay, Surface> display = channel.createVirtualDisplay(width, height, density);
                     if (display == null) throw new Exception("Failed to create virtual display");
-                    int createdDisplayId = display.getDisplay().getDisplayId();
+                    int createdDisplayId = display.first.getDisplay().getDisplayId();
                     cache.put(createdDisplayId, display);
                     int[] displayIds = DisplayManager.getDisplayIds();
                     for (int displayId : displayIds) {
@@ -214,10 +222,10 @@ public class Server {
                         if (line2 != null) Channel.execReadOutput("wm size " + width + "x" + height);
                         if (line4 != null) Channel.execReadOutput("wm density " + density);
                     } else {
-                        VirtualDisplay virtualDisplay = cache.get(id);
+                        Pair<VirtualDisplay, Surface> virtualDisplay = cache.get(id);
                         if (virtualDisplay == null)
                             throw new Exception("specified virtual display not found, it might not be created by this server");
-                        virtualDisplay.resize(width, height, density);
+                        virtualDisplay.first.resize(width, height, density);
                     }
                     postResponse("success resize display, id -> " + id);
                     break;
@@ -225,21 +233,22 @@ public class Server {
                 case "/releaseVirtualDisplay": {
                     String id = request.get("id");
                     if (id == null) throw new Exception("parameter 'id' not found");
-                    VirtualDisplay display = cache.get(Integer.parseInt(id));
+                    Pair<VirtualDisplay, Surface> display = cache.get(Integer.parseInt(id));
                     if (display == null)
                         throw new Exception("specified virtual display not found, it might not be created by this server");
                     JSONObject tasks = channel.getRecentTasksJson(25, 0, 0);
                     JSONArray tasks_data = tasks.getJSONArray("data");
                     for (int i = 0; i < tasks_data.length(); i++) {
-                        JSONObject task = tasks_data.getJSONObject(i);
-                        if (id.equals(String.valueOf(task.getInt("displayId")))) {
-                            try {
+                        try {
+                            JSONObject task = tasks_data.getJSONObject(i);
+                            if (id.equals(String.valueOf(task.getInt("displayId")))) {
                                 Channel.execReadOutput("am display move-stack " + task.getInt("id") + " 0");
-                            } catch (Exception ignored) {
                             }
+                        } catch (Exception ignored) {
                         }
                     }
-                    display.release();
+                    display.first.release();
+                    display.second.release();
                     cache.remove(Integer.parseInt(id));
                     postResponse("success release display, id -> " + id);
                     break;
@@ -310,6 +319,33 @@ public class Server {
         } catch (Exception e) {
             postResponse(e.getMessage());
             L.e("handleRequest error", e);
+        }
+    }
+
+    private void releaseAllVirtualDisplay() {
+        if (cache.isEmpty()) return;
+        try {
+            JSONObject tasks = channel.getRecentTasksJson(25, 0, 0);
+            JSONArray tasks_data = tasks.getJSONArray("data");
+            for (int i = 0; i < tasks_data.length(); i++) {
+                try {
+                    JSONObject task = tasks_data.getJSONObject(i);
+                    if (cache.containsKey(task.getInt("displayId"))) {
+                        Channel.execReadOutput("am display move-stack " + task.getInt("id") + " 0");
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        } catch (Exception e) {
+            L.e("releaseAllVirtualDisplay error", e);
+        }
+        for (int displayId : cache.keySet()) {
+            Pair<VirtualDisplay, Surface> display = cache.get(displayId);
+            if (display != null) {
+                display.first.release();
+                display.second.release();
+            }
+            cache.remove(displayId);
         }
     }
 }

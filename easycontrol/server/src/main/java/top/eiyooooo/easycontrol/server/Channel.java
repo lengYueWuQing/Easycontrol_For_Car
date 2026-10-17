@@ -25,6 +25,7 @@ import android.os.Build;
 import android.os.Looper;
 import android.util.Base64;
 import android.util.DisplayMetrics;
+import android.util.Pair;
 import android.view.Surface;
 import android.view.SurfaceView;
 import org.json.JSONArray;
@@ -471,28 +472,29 @@ public class Channel {
         return jsonObjectResult;
     }
 
-    public VirtualDisplay createVirtualDisplay(int width, int height, int density) throws Exception {
+    public Pair<VirtualDisplay, Surface> createVirtualDisplay(int width, int height, int density) throws Exception {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R)
             throw new Exception("Virtual display is not supported before Android 11");
-        Surface surface;
-        try {
-            SurfaceView surfaceView = new SurfaceView(FakeContext.get());
-            surface = surfaceView.getHolder().getSurface();
-        } catch (Exception ignored) {
-            L.w("Failed to create SurfaceView, trying MediaCodec");
+        Surface surface = null;
+		try {
             surface = MediaCodec.createPersistentInputSurface();
+        } catch (Exception ignored) {
+            L.w("Failed to create MediaCodec persistent input surface");
+        }
+        
+        if (surface == null) {
+            try {
+	            SurfaceView surfaceView = new SurfaceView(FakeContext.get());
+	            surface = surfaceView.getHolder().getSurface();
+	        } catch (Exception ignored) {
+	            L.w("Failed to create SurfaceView, trying MediaCodec");
+	        }
         }
         if (surface == null) throw new Exception("Failed to create surface");
-        try {
-            // Android 13 上公开 API 因 packageName 校验失败（packageName must match the calling uid）被拒，
-            // 优先通过隐藏静态方法创建独立虚拟显示（INVALID_DISPLAY 表示非镜像）
-            return top.eiyooooo.easycontrol.server.wrappers.DisplayManager.createVirtualDisplay("easycontrol_for_car", width, height, android.view.Display.INVALID_DISPLAY, surface);
-        } catch (Exception e) {
-            L.w("createVirtualDisplay by internal method error, fallback to public api", e);
-        }
         android.hardware.display.DisplayManager displayManager = DisplayManager.class.getDeclaredConstructor(Context.class).newInstance(FakeContext.get());
         int flags = getVirtualDisplayFlags();
-        return displayManager.createVirtualDisplay("easycontrol_for_car", width, height, density, surface, flags);
+        VirtualDisplay virtualDisplay = displayManager.createVirtualDisplay("easycontrol_for_car", width, height, density, surface, flags);
+        return new Pair<>(virtualDisplay, surface);
     }
 
     private static int getVirtualDisplayFlags() {

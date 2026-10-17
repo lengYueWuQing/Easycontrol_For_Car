@@ -131,18 +131,6 @@
 
         </GridLayout>
 
-        <Button
-          android:id="@+id/pair_by_qr"
-          android:layout_width="match_parent"
-          android:layout_height="wrap_content"
-          android:layout_marginBottom="4dp"
-          android:background="@drawable/background_cron"
-          android:backgroundTint="@color/button"
-          android:gravity="center"
-          android:text="@string/pair_by_qr"
-          android:textColor="@color/onButton"
-          android:textSize="@dimen/smallFont"/>
-
         <TextView
           android:id="@+id/opening_port"
           android:layout_width="match_parent"

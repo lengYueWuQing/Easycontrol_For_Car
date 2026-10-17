@@ -8,23 +8,23 @@
   android:paddingBottom="10dp">
 
   <FrameLayout
-      android:layout_width="wrap_content"
-      android:layout_height="wrap_content"
-      android:layout_marginStart="-10dp"
-      android:background="@drawable/background_cron"
-      android:elevation="8dp"
-      tools:ignore="UselessParent">
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="-10dp"
+    android:background="@drawable/background_cron"
+    android:elevation="8dp"
+    tools:ignore="UselessParent">
 
     <View
-        android:id="@+id/bar"
-        android:layout_width="12dp"
-        android:layout_height="30dp"
-        android:layout_marginStart="22dp"
-        android:layout_marginTop="12dp"
-        android:layout_marginEnd="12dp"
-        android:layout_marginBottom="12dp"
-        android:background="@drawable/background_cron"
-        android:backgroundTint="@color/bar1" />
+      android:id="@+id/bar"
+      android:layout_width="12dp"
+      android:layout_height="30dp"
+      android:layout_marginStart="22dp"
+      android:layout_marginTop="12dp"
+      android:layout_marginEnd="12dp"
+      android:layout_marginBottom="12dp"
+      android:background="@drawable/background_cron"
+      android:backgroundTint="@color/bar1" />
   </FrameLayout>
 
 </FrameLayout>
