@@ -168,8 +168,10 @@ public class Client {
     if (ScreenMode != 1001) cmd.append(" ScreenMode=").append(ScreenMode);
     if (!(device.useH265 && supportH265)) cmd.append(" useH265=0");
     if (!(device.useOpus && supportOpus)) cmd.append(" useOpus=0");
-    cmd.append(" \n");
-    shell.write(ByteBuffer.wrap(cmd.toString().getBytes()));
+    // root shell 下同样要降权运行编码器进程，否则 Android 13 上编码器 createVirtualDisplay/音频归因失败
+    // 注意：命令必须以换行结尾，交互式 shell 收到换行才会执行；wrapServerCmd 后补回换行
+    String scrcpyCmd = adb.wrapServerCmd(cmd.toString().trim());
+    shell.write(ByteBuffer.wrap((scrcpyCmd + " \n").getBytes()));
     logger();
   }
 

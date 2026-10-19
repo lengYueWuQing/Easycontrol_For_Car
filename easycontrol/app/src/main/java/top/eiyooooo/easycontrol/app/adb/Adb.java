@@ -38,6 +38,8 @@ public class Adb {
   private static final String serverName = "/data/local/tmp/easycontrol_for_car_server_" + BuildConfig.VERSION_CODE + ".jar";
   public Thread startServerThread = new Thread(this::startServer);
   public BufferStream serverShell;
+  // adb shell 是否以 root（KernelSU/adb root）运行且可用 su 降权，connect 时探测
+  public boolean rootShell = false;
   // 设备型号与系统版本，最开始连接时获取
   public String model;
   public String version;
@@ -101,8 +103,16 @@ public class Adb {
     try {
       model = runAdbCmd("getprop ro.product.model").trim();
       version = runAdbCmd("getprop ro.build.version.release").trim();
+      // 探测 shell 是否 root：Android 13 校验 createVirtualDisplay 的 packageName 与 calling uid 一致，
+      // root(uid 0) 无可匹配包名必然抛 SecurityException（应用流转/镜像编码器不可用），音频 AppOps 归因同样会失败
+      rootShell = "0".equals(runAdbCmd("id -u").trim()) && !runAdbCmd("which su").trim().isEmpty();
     } catch (Exception ignored) {
     }
+  }
+
+  // root shell 下用 su 降权到 shell uid 运行 server 进程（app_process 无法自降权，必须在启动命令外包一层）
+  public String wrapServerCmd(String cmd) {
+    return rootShell ? "su 2000 -c '" + cmd + "'" : cmd;
   }
 
   public final void startServer() {
@@ -112,7 +122,7 @@ public class Adb {
         pushFile(AppData.main.getResources().openRawResource(R.raw.easycontrol_server), serverName);
       }
       if (serverShell != null) serverShell.close();
-      String cmd = "CLASSPATH=" + serverName + " app_process / top.eiyooooo.easycontrol.server.Server\n";
+      String cmd = wrapServerCmd("CLASSPATH=" + serverName + " app_process / top.eiyooooo.easycontrol.server.Server") + "\n";
       serverShell = getShell();
       serverShell.write(ByteBuffer.wrap(cmd.getBytes()));
       waitingData(0);
