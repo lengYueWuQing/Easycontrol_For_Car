@@ -84,17 +84,17 @@ public class Adb {
     }
     MAX_DATA = message.arg1;
     if (uuid == null) {
-      // 一次性连接：获取设备型号与系统版本后关闭（用于扫描设备时识别设备）
-      try {
-        handleInThread.start();
-        handleOutThread.start();
-        model = runAdbCmd("getprop ro.product.model").trim();
-        version = runAdbCmd("getprop ro.build.version.release").trim();
-      } catch (Exception ignored) {
+        // 一次性连接：获取设备型号与系统版本后关闭（用于扫描设备时识别设备）
+        try {
+          handleInThread.start();
+          handleOutThread.start();
+          model = runAdbCmd("getprop ro.product.model").trim();
+          version = getDeviceVersion();
+        } catch (Exception ignored) {
+        }
+        close();
+        return;
       }
-      close();
-      return;
-    }
     // 启动后台进程
     handleInThread.setPriority(Thread.MAX_PRIORITY);
     handleInThread.start();
@@ -102,12 +102,28 @@ public class Adb {
     // 最开始连接时获取设备型号与系统版本
     try {
       model = runAdbCmd("getprop ro.product.model").trim();
-      version = runAdbCmd("getprop ro.build.version.release").trim();
+      version = getDeviceVersion();
       // 探测 shell 是否 root：Android 13 校验 createVirtualDisplay 的 packageName 与 calling uid 一致，
       // root(uid 0) 无可匹配包名必然抛 SecurityException（应用流转/镜像编码器不可用），音频 AppOps 归因同样会失败
       rootShell = "0".equals(runAdbCmd("id -u").trim()) && !runAdbCmd("which su").trim().isEmpty();
     } catch (Exception ignored) {
     }
+  }
+
+  // 部分模拟器/云手机镜像会伪造 ro.build.version.release（如改成 6.0.1）但漏改 fingerprint，
+  // 两者不一致时以 fingerprint 中的版本为准
+  private String getDeviceVersion() throws InterruptedException {
+    String version = runAdbCmd("getprop ro.build.version.release").trim();
+    try {
+      String fingerprint = runAdbCmd("getprop ro.build.fingerprint").trim();
+      int colon = fingerprint.indexOf(':');
+      if (colon >= 0) {
+        String fpVersion = fingerprint.substring(colon + 1).split("/")[0].trim();
+        if (!fpVersion.isEmpty() && !fpVersion.equals(version)) version = fpVersion;
+      }
+    } catch (Exception ignored) {
+    }
+    return version;
   }
 
   // root shell 下用 su 降权到 shell uid 运行 server 进程（app_process 无法自降权，必须在启动命令外包一层）
