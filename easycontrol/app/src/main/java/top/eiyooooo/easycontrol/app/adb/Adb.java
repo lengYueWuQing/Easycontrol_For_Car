@@ -40,6 +40,8 @@ public class Adb {
   public BufferStream serverShell;
   // adb shell 是否以 root（KernelSU/adb root）运行且可用 su 降权，connect 时探测
   public boolean rootShell = false;
+  // su+runcon 探测结果：可降权到 shell uid 且切到标准 shell SELinux context
+  public boolean shellContext = false;
   // 被控端 SDK 版本，连接时获取
   public int deviceSdk = 0;
   // 设备型号与系统版本，最开始连接时获取
@@ -108,6 +110,13 @@ public class Adb {
       // 探测 shell 是否 root：Android 13 校验 createVirtualDisplay 的 packageName 与 calling uid 一致，
       // root(uid 0) 无可匹配包名必然抛 SecurityException（应用流转/镜像编码器不可用），音频 AppOps 归因同样会失败
       rootShell = "0".equals(runAdbCmd("id -u").trim()) && !runAdbCmd("which su").trim().isEmpty();
+      // 探测 su+runcon 能否降权到 shell uid 且切到标准 shell SELinux context（等效普通未 root 设备的 adb shell）：
+      // KSU 环境的 ksu context 即使降权到 uid 2000 也缺 INJECT_EVENTS，Android 17+ 触摸注入失败，
+      // runcon 到 u:r:shell:s0 可彻底解决；探测失败则回退版本分流策略
+      if (rootShell) {
+        String probe = runAdbCmd("su 2000 -c '/system/bin/runcon u:r:shell:s0 /system/bin/sh -c id'");
+        shellContext = probe.contains("uid=2000") && probe.contains("u:r:shell:s0");
+      }
       try {
         deviceSdk = Integer.parseInt(runAdbCmd("getprop ro.build.version.sdk").trim());
       } catch (Exception ignored) {
@@ -132,14 +141,18 @@ public class Adb {
     return version;
   }
 
-  // root shell 下用 su 降权到 shell uid 运行 server 进程（app_process 无法自降权，必须在启动命令外包一层）
-  // root shell 下决定 server/scrcpy 进程的运行 uid：
-  // - Android 13-15（SDK 33-35）：createVirtualDisplay 校验 packageName==calling uid，root 必被拒，须降权到 shell
-  // - Android 16（SDK 36）：shell 两种权限均有（已实测），维持降权
-  // - Android 17+（SDK 37+）：injectInputEvent 收紧为必须 INJECT_EVENTS 权限，shell 被拒（触摸失效），
+  // root shell 下决定 server/scrcpy 进程的运行 uid 与 SELinux context：
+  // - su+runcon 可用（shellContext=true）：降权到 shell uid + u:r:shell:s0，等效普通未 root 设备的 adb shell，
+  //   所有 Android 版本统一走标准 shell 权限（含 INJECT_EVENTS），无需 root 特权
+  // - runcon 不可用时按版本回退：
+  //   Android 13-15（SDK 33-35）：createVirtualDisplay 校验 packageName==calling uid，root 必被拒，须降权到 shell
+  //   Android 16（SDK 36）：shell 两种权限均有（已实测），维持降权
+  //   Android 17+（SDK 37+）：injectInputEvent 收紧为必须 INJECT_EVENTS 权限，shell(uid) 被拒（触摸失效），
   //   而 createVirtualDisplay 对 root 已放宽，须以 root 运行
   public String wrapServerCmd(String cmd) {
-    if (!rootShell || deviceSdk >= 37) return cmd;
+    if (!rootShell) return cmd;
+    if (shellContext) return "su 2000 -c '/system/bin/runcon u:r:shell:s0 /system/bin/sh -c \"" + cmd + "\"'";
+    if (deviceSdk >= 37) return cmd;
     return "su 2000 -c '" + cmd + "'";
   }
 
