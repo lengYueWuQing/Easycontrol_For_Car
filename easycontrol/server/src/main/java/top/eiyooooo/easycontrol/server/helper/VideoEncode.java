@@ -149,17 +149,13 @@ public final class VideoEncode {
     private static final MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
 
     public static void encodeOut() throws IOException, ErrnoException {
-        try {
-            // 找到已完成的输出缓冲区
-            int outIndex;
-            do outIndex = encoder.dequeueOutputBuffer(bufferInfo, -1); while (outIndex < 0);
-            ByteBuffer buffer = encoder.getOutputBuffer(outIndex);
-            if (buffer == null) return;
-            ControlPacket.sendVideoEvent(bufferInfo.presentationTimeUs, buffer);
-            encoder.releaseOutputBuffer(outIndex, false);
-        } catch (IllegalStateException e) {
-            L.e("encodeOut error", e);
-        }
+        // 找到已完成的输出缓冲区
+        int outIndex;
+        do outIndex = encoder.dequeueOutputBuffer(bufferInfo, -1); while (outIndex < 0);
+        ByteBuffer buffer = encoder.getOutputBuffer(outIndex);
+        if (buffer == null) return;
+        ControlPacket.sendVideoEvent(bufferInfo.presentationTimeUs, buffer);
+        encoder.releaseOutputBuffer(outIndex, false);
     }
 
     public static void release() {

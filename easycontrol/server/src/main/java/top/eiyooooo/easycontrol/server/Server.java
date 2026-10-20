@@ -50,7 +50,7 @@ public class Server {
                 while (true) {
                     try {
                         String input = scanner.nextLine();
-                        L.d("INPUT: " + input);
+                        L.logToFile("INPUT: " + input);
                         if (input.startsWith("/exit")) {
                             releaseAllVirtualDisplay();
                             System.exit(0);
@@ -70,7 +70,12 @@ public class Server {
     private void postResponse(String response) {
         try {
             if (response == null) response = "null";
-            L.d("RESPONSE: " + response);
+            // 响应可能包含大量图标 base64 数据（如应用列表），日志只打印前缀与总长度
+            if (response.length() > 2000) {
+                L.logToFile("RESPONSE: [" + response.length() + " bytes] " + response.substring(0, 2000) + "...");
+            } else {
+                L.logToFile("RESPONSE: " + response);
+            }
             byte[] responseBytes = response.getBytes(StandardCharsets.UTF_8);
             outputStream.writeInt(responseBytes.length);
             outputStream.writeInt(responseBytes.length);
@@ -185,7 +190,7 @@ public class Server {
                     cache.put(createdDisplayId, display);
                     int[] displayIds = DisplayManager.getDisplayIds();
                     for (int displayId : displayIds) {
-                        L.d(">>>display -> " + displayId);
+                        L.logToFile(">>>display -> " + displayId);
                     }
                     postResponse("success create display, id -> " + createdDisplayId);
                     break;
@@ -271,7 +276,7 @@ public class Server {
                     String packageName = request.get("package");
                     if (packageName == null) throw new Exception("parameter 'package' not found");
                     String cmd = "am force-stop " + packageName;
-                    L.d("stopActivity activity cmd: " + cmd);
+                    L.logToFile("stopActivity activity cmd: " + cmd);
                     Channel.execReadOutput(cmd);
                     postResponse("success");
                     break;
@@ -296,13 +301,13 @@ public class Server {
                 case "/runShell": {
                     String cmd = request.get("cmd");
                     if (cmd == null) throw new Exception("parameter 'cmd' not found");
-                    L.d("runShell cmd: " + cmd);
+                    L.logToFile("runShell cmd: " + cmd);
                     postResponse(Channel.execReadOutput(cmd));
                     break;
                 }
                 case "/getNightMode": {
                     int nightMode = UiModeManager.getNightMode();
-                    L.d("nightMode: " + nightMode);
+                    L.logToFile("nightMode: " + nightMode);
                     postResponse(String.valueOf(nightMode));
                     break;
                 }

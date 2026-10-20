@@ -40,6 +40,8 @@ public class Adb {
   public BufferStream serverShell;
   // adb shell 是否以 root（KernelSU/adb root）运行且可用 su 降权，connect 时探测
   public boolean rootShell = false;
+  // 被控端 SDK 版本，连接时获取
+  public int deviceSdk = 0;
   // 设备型号与系统版本，最开始连接时获取
   public String model;
   public String version;
@@ -106,6 +108,10 @@ public class Adb {
       // 探测 shell 是否 root：Android 13 校验 createVirtualDisplay 的 packageName 与 calling uid 一致，
       // root(uid 0) 无可匹配包名必然抛 SecurityException（应用流转/镜像编码器不可用），音频 AppOps 归因同样会失败
       rootShell = "0".equals(runAdbCmd("id -u").trim()) && !runAdbCmd("which su").trim().isEmpty();
+      try {
+        deviceSdk = Integer.parseInt(runAdbCmd("getprop ro.build.version.sdk").trim());
+      } catch (Exception ignored) {
+      }
     } catch (Exception ignored) {
     }
   }
@@ -127,8 +133,14 @@ public class Adb {
   }
 
   // root shell 下用 su 降权到 shell uid 运行 server 进程（app_process 无法自降权，必须在启动命令外包一层）
+  // root shell 下决定 server/scrcpy 进程的运行 uid：
+  // - Android 13-15（SDK 33-35）：createVirtualDisplay 校验 packageName==calling uid，root 必被拒，须降权到 shell
+  // - Android 16（SDK 36）：shell 两种权限均有（已实测），维持降权
+  // - Android 17+（SDK 37+）：injectInputEvent 收紧为必须 INJECT_EVENTS 权限，shell 被拒（触摸失效），
+  //   而 createVirtualDisplay 对 root 已放宽，须以 root 运行
   public String wrapServerCmd(String cmd) {
-    return rootShell ? "su 2000 -c '" + cmd + "'" : cmd;
+    if (!rootShell || deviceSdk >= 37) return cmd;
+    return "su 2000 -c '" + cmd + "'";
   }
 
   public final void startServer() {
@@ -137,6 +149,8 @@ public class Adb {
         runAdbCmd("rm /data/local/tmp/easycontrol_* ");
         pushFile(AppData.main.getResources().openRawResource(R.raw.easycontrol_server), serverName);
       }
+      // 首次连接清理上次异常退出残留的编码器进程（避免占用 localabstract socket；正常会话结束时编码器自行退出）
+      if (rootShell) runAdbCmd("pkill -f easycontrol.server.Scrcpy");
       if (serverShell != null) serverShell.close();
       String cmd = wrapServerCmd("CLASSPATH=" + serverName + " app_process / top.eiyooooo.easycontrol.server.Server") + "\n";
       serverShell = getShell();

@@ -8,12 +8,16 @@ import android.media.*;
 import android.os.Build;
 import android.os.Looper;
 import android.os.Parcel;
+import top.eiyooooo.easycontrol.server.entity.Options;
 import top.eiyooooo.easycontrol.server.utils.L;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 
 public final class AudioCapture {
 
@@ -53,24 +57,71 @@ public final class AudioCapture {
     // 必须持有 policy 引用，否则会被系统注销导致采集失效
     private static Object registeredAudioPolicy;
 
-    // Android 16+ 通过 AudioPolicy 混音采集播放音频（参考 scrcpy audio/AudioPlaybackCapture）：
-    // AudioMixingRule rule = new AudioMixingRule.Builder()
-    //         .setTargetMixRole(AudioMixingRule.MIX_ROLE_PLAYERS)
-    //         .addMixRule(AudioMixingRule.RULE_MATCH_ATTRIBUTE_USAGE, usage)
-    //         .voiceCommunicationCaptureAllowed(true)
-    //         .build();
-    // AudioMix mix = new AudioMix.Builder(rule).setRouteFlags(ROUTE_FLAG_LOOP_BACK | ROUTE_FLAG_RENDER).setFormat(format).build();
-    // AudioPolicy policy = new AudioPolicy.Builder(context).addMix(mix).build();
-    // AudioManager.registerAudioPolicyStatic(policy);
-    // return policy.createAudioRecordSink(mix);
+    // uid 设备亲和成功时记录，release 时必须清除，否则该应用的播放会一直路由到已销毁的采集设备
+    private static AudioManager affinityAudioManager;
+    private static int affinityUid = -1;
+
+    private static Class<?> mixingRuleClass, audioMixClass, audioPolicyClass;
+
+    // Android 16+ 通过 AudioPolicy 混音采集播放音频（参考 scrcpy audio/AudioPlaybackCapture）。
+    // 流转指定应用时（Options.audioPackage 非空）按 uid 过滤：native AudioMix 匹配规则只认
+    // usage/capture-preset、不支持 uid，因此用"永不命中的占位规则 + setUidDeviceAffinities
+    // 把该应用的播放强制路由进采集流"实现按应用分流，其他应用声音留在被控端；失败回退全局混音。
     @SuppressLint({"WrongConstant", "MissingPermission"})
     private static AudioRecord createAudioRecordByAudioPolicy() throws Exception {
-        Class<?> mixingRuleClass = Class.forName("android.media.audiopolicy.AudioMixingRule");
+        Integer captureUid = Options.audioPackage.isEmpty() ? null : getPackageUid(Options.audioPackage);
+        if (captureUid != null) {
+            AudioRecord uidRecord = null;
+            try {
+                uidRecord = createAudioRecordByUidAffinity(captureUid);
+                return uidRecord;
+            } catch (Throwable e) {
+                L.w("uid affinity capture failed, fallback to global mix", e);
+                if (uidRecord != null) {
+                    try {
+                        uidRecord.release();
+                    } catch (Exception ignored) {
+                    }
+                }
+                unregisterPolicy();
+            }
+        }
+        return createAudioRecordByGlobalRule();
+    }
+
+    private static void resolvePolicyClasses() throws ClassNotFoundException {
+        mixingRuleClass = Class.forName("android.media.audiopolicy.AudioMixingRule");
+        audioMixClass = Class.forName("android.media.audiopolicy.AudioMix");
+        audioPolicyClass = Class.forName("android.media.audiopolicy.AudioPolicy");
+    }
+
+    private static AudioFormat buildCaptureFormat() {
+        return new AudioFormat.Builder()
+                .setEncoding(ENCODING)
+                .setSampleRate(SAMPLE_RATE)
+                .setChannelMask(CHANNEL_CONFIG)
+                .build();
+    }
+
+    // 回退：注销已注册的 policy（uid 亲和路径失败时清理，避免残留 mix 劫持路由）
+    private static void unregisterPolicy() {
+        if (registeredAudioPolicy == null) return;
+        try {
+            AudioManager.class.getMethod("unregisterAudioPolicyStatic", audioPolicyClass)
+                    .invoke(null, registeredAudioPolicy);
+        } catch (Exception e) {
+            L.e("unregisterAudioPolicyStatic", e);
+        }
+        registeredAudioPolicy = null;
+    }
+
+    // 全局混音：采集所有媒体类播放，其他应用声音也会传到控制端
+    @SuppressLint({"WrongConstant", "MissingPermission"})
+    private static AudioRecord createAudioRecordByGlobalRule() throws Exception {
+        resolvePolicyClasses();
         Class<?> mixingRuleBuilderClass = Class.forName("android.media.audiopolicy.AudioMixingRule$Builder");
-        Class<?> audioMixClass = Class.forName("android.media.audiopolicy.AudioMix");
         Class<?> audioMixBuilderClass = Class.forName("android.media.audiopolicy.AudioMix$Builder");
         Class<?> audioPolicyBuilderClass = Class.forName("android.media.audiopolicy.AudioPolicy$Builder");
-        Class<?> audioPolicyClass = Class.forName("android.media.audiopolicy.AudioPolicy");
 
         // 构建 AudioMixingRule
         Object ruleBuilder = mixingRuleBuilderClass.getDeclaredConstructor().newInstance();
@@ -90,24 +141,90 @@ public final class AudioCapture {
         }
         Object mixingRule = mixingRuleBuilderClass.getMethod("build").invoke(ruleBuilder);
 
-        // 构建 AudioMix，ROUTE_FLAG_LOOP_BACK 采集且 ROUTE_FLAG_RENDER 保证设备继续外放
+        Object audioMix = buildAudioMix(mixingRuleBuilderClass, audioMixBuilderClass, mixingRule, routeFlags());
+        return buildAndRegisterAudioRecord(audioPolicyBuilderClass, audioMix);
+    }
+
+    private static int routeFlags() {
+        return getStaticInt(audioMixClass, "ROUTE_FLAG_LOOP_BACK", 2) | getStaticInt(audioMixClass, "ROUTE_FLAG_RENDER", 1);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object buildAudioMix(Class<?> mixingRuleBuilderClass, Class<?> audioMixBuilderClass,
+                                        Object mixingRule, int routeFlags) throws Exception {
+        // AudioMix，ROUTE_FLAG_LOOP_BACK 采集且 ROUTE_FLAG_RENDER 保证设备继续外放
         Constructor<?> mixBuilderConstructor = audioMixBuilderClass.getDeclaredConstructor(mixingRuleClass);
         mixBuilderConstructor.setAccessible(true);
         Object mixBuilder = mixBuilderConstructor.newInstance(mixingRule);
-        int routeFlags = getStaticInt(audioMixClass, "ROUTE_FLAG_LOOP_BACK", 2) | getStaticInt(audioMixClass, "ROUTE_FLAG_RENDER", 1);
         audioMixBuilderClass.getMethod("setRouteFlags", int.class).invoke(mixBuilder, routeFlags);
         // 尽量对齐编码器格式（48kHz/双声道/PCM16）
-        AudioFormat format = new AudioFormat.Builder()
-                .setEncoding(ENCODING)
-                .setSampleRate(SAMPLE_RATE)
-                .setChannelMask(CHANNEL_CONFIG)
-                .build();
         try {
-            audioMixBuilderClass.getMethod("setFormat", AudioFormat.class).invoke(mixBuilder, format);
+            audioMixBuilderClass.getMethod("setFormat", AudioFormat.class).invoke(mixBuilder, buildCaptureFormat());
         } catch (NoSuchMethodException ignored) {
         }
-        Object audioMix = audioMixBuilderClass.getMethod("build").invoke(mixBuilder);
+        return audioMixBuilderClass.getMethod("build").invoke(mixBuilder);
+    }
 
+    // 按 uid 过滤：mix 用不会命中的占位规则（播放侧无 capture preset，永不匹配任何播放），
+    // 流转应用的播放经 setUidDeviceAffinities 强制路由到本 mix 的 REMOTE_SUBMIX 设备进入采集流，
+    // 其他应用正常走扬声器、不进混音，控制端只听得到流转应用的声音
+    @SuppressLint({"WrongConstant", "MissingPermission"})
+    private static AudioRecord createAudioRecordByUidAffinity(int uid) throws Exception {
+        resolvePolicyClasses();
+        Class<?> mixingRuleBuilderClass = Class.forName("android.media.audiopolicy.AudioMixingRule$Builder");
+        Class<?> audioMixBuilderClass = Class.forName("android.media.audiopolicy.AudioMix$Builder");
+        Class<?> audioPolicyBuilderClass = Class.forName("android.media.audiopolicy.AudioPolicy$Builder");
+
+        AudioManager audioManager = (AudioManager) FakeContext.get().getSystemService(Context.AUDIO_SERVICE);
+        // 记录注册前已存在的 REMOTE_SUBMIX 输出设备地址，注册后新出现的就是本 mix 的设备
+        HashSet<String> before = new HashSet<>();
+        for (AudioDeviceInfo info : audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            if (info.getType() == AudioDeviceInfo.TYPE_REMOTE_SUBMIX) before.add(info.getAddress());
+        }
+
+        // 占位规则：AudioMixingRule.build 要求至少一条规则，用播放侧不存在的 capture preset
+        Object ruleBuilder = mixingRuleBuilderClass.getDeclaredConstructor().newInstance();
+        mixingRuleBuilderClass.getMethod("setTargetMixRole", int.class)
+                .invoke(ruleBuilder, getStaticInt(mixingRuleClass, "MIX_ROLE_PLAYERS", 0));
+        Method addMixRuleMethod = mixingRuleBuilderClass.getMethod("addMixRule", int.class, Object.class);
+        int presetRule = getStaticInt(mixingRuleClass, "RULE_MATCH_ATTRIBUTE_CAPTURE_PRESET", 2);
+        AudioAttributes.Builder placeholderBuilder = new AudioAttributes.Builder();
+        // setCapturePreset 为 @hide，播放侧属性不存在 capture preset，该规则永不匹配
+        placeholderBuilder.getClass().getMethod("setCapturePreset", int.class)
+                .invoke(placeholderBuilder, MediaRecorder.AudioSource.UNPROCESSED);
+        AudioAttributes placeholder = placeholderBuilder.build();
+        addMixRuleMethod.invoke(ruleBuilder, presetRule, placeholder);
+        Object mixingRule = mixingRuleBuilderClass.getMethod("build").invoke(ruleBuilder);
+
+        Object audioMix = buildAudioMix(mixingRuleBuilderClass, audioMixBuilderClass, mixingRule, routeFlags());
+        AudioRecord record = buildAndRegisterAudioRecord(audioPolicyBuilderClass, audioMix);
+
+        // 找到本 mix 注册后新建的 REMOTE_SUBMIX 输出设备
+        AudioDeviceInfo target = null;
+        for (AudioDeviceInfo info : audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            if (info.getType() == AudioDeviceInfo.TYPE_REMOTE_SUBMIX && !before.contains(info.getAddress())) {
+                target = info;
+                break;
+            }
+        }
+        if (target == null) throw new Exception("remote submix output device of mix not found");
+
+        // setUidDeviceAffinities(uid, List<AudioDevice>)：把该应用的播放强制路由到采集设备
+        Class<?> audioDeviceClass = Class.forName("android.media.AudioDevice");
+        Object audioDevice = audioDeviceClass.getDeclaredConstructor(int.class, AudioDeviceInfo.class)
+                .newInstance(getStaticInt(audioDeviceClass, "ROLE_OUTPUT", 1), target);
+        ArrayList<Object> devices = new ArrayList<>();
+        devices.add(audioDevice);
+        audioManager.getClass().getMethod("setUidDeviceAffinities", int.class, List.class)
+                .invoke(audioManager, uid, devices);
+        affinityAudioManager = audioManager;
+        affinityUid = uid;
+        L.d("audio capture by uid affinity: uid=" + uid + " device=" + target.getAddress());
+        return record;
+    }
+
+    @SuppressLint({"WrongConstant", "MissingPermission"})
+    private static AudioRecord buildAndRegisterAudioRecord(Class<?> audioPolicyBuilderClass, Object audioMix) throws Exception {
         // 构建 AudioPolicy
         Object policyBuilder = audioPolicyBuilderClass.getDeclaredConstructor(Context.class).newInstance(FakeContext.get());
         audioPolicyBuilderClass.getMethod("addMix", audioMixClass).invoke(policyBuilder, audioMix);
@@ -121,11 +238,35 @@ public final class AudioCapture {
         return audioRecord;
     }
 
+    // 会话结束释放 uid 亲和，恢复该应用的正常路由
+    public static void releaseAffinity() {
+        if (affinityAudioManager == null) return;
+        try {
+            affinityAudioManager.getClass().getMethod("removeUidDeviceAffinities", int.class)
+                    .invoke(affinityAudioManager, affinityUid);
+            L.d("uid affinity removed: uid=" + affinityUid);
+        } catch (Exception e) {
+            L.e("removeUidDeviceAffinities", e);
+        }
+        affinityAudioManager = null;
+        affinityUid = -1;
+    }
+
     private static int getStaticInt(Class<?> cls, String fieldName, int defaultValue) {
         try {
             return cls.getField(fieldName).getInt(null);
         } catch (Exception e) {
             return defaultValue;
+        }
+    }
+
+    // 查询应用的 uid（shell 权限可查任意包），失败返回 null 由调用方回退全局混音
+    private static Integer getPackageUid(String packageName) {
+        try {
+            return FakeContext.get().getPackageManager().getApplicationInfo(packageName, 0).uid;
+        } catch (Exception e) {
+            L.w("getPackageUid " + packageName, e);
+            return null;
         }
     }
 

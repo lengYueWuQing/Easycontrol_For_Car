@@ -74,18 +74,18 @@ public class Channel {
                     dm.registerDisplayListener(new DisplayManager.DisplayListener() {
                         @Override
                         public void onDisplayAdded(int displayId) {
-                            L.d("onDisplayAdded invoked displayId:" + displayId);
+                            L.logToFile("onDisplayAdded invoked displayId:" + displayId);
                         }
 
                         @Override
                         public void onDisplayRemoved(int displayId) {
-                            L.d("onDisplayRemoved invoked displayId:" + displayId);
+                            L.logToFile("onDisplayRemoved invoked displayId:" + displayId);
 
                         }
 
                         @Override
                         public void onDisplayChanged(int displayId) {
-                            L.d("onDisplayChanged invoked displayId:" + displayId);
+                            L.logToFile("onDisplayChanged invoked displayId:" + displayId);
                         }
                     }, null);
 
